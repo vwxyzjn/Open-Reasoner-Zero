@@ -405,7 +405,7 @@ def _get_critic_model(base_pretrained_model, base_llm_model, value_head_prefix="
 
         def forward(
             self,
-            input_ids: torch.LongTensor = None,
+            sequences: torch.LongTensor = None,
             num_actions: Optional[Union[int, list[int]]] = None,
             attention_mask: Optional[torch.Tensor] = None,
             return_output=False,
@@ -420,7 +420,7 @@ def _get_critic_model(base_pretrained_model, base_llm_model, value_head_prefix="
             position_ids.masked_fill_(attention_mask == 0, 1)
 
             outputs = getattr(self, self.base_model_prefix)(
-                input_ids, attention_mask=attention_mask, position_ids=position_ids
+                sequences, attention_mask=attention_mask, position_ids=position_ids
             )
             last_hidden_states = outputs["last_hidden_state"]
             values = getattr(self, self.value_head_prefix)(last_hidden_states).squeeze(-1)[:, :-1]
