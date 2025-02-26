@@ -7,7 +7,7 @@ import torch
 from torch.nn.utils.rnn import pad_sequence
 
 from orz.ppo.models import get_llm_for_sequence_regression
-from packing import _convert_prompts_outputs_to_batch_tensors_packing
+from packing import _convert_prompts_outputs_to_batch_tensors_packing, _tokenize
 from transformers import AutoTokenizer
 import torch.nn.functional as F
 import torch.nn as nn
@@ -63,7 +63,6 @@ def compute_reward(
         if r is not None:
             kl_reward[:, torch.tensor(num_actions).cumsum(dim=-1) - 1] += r
 
-        breakpoint()
         if custom_rewards is not None:
             custom_rewards = torch.cat(custom_rewards, dim=0)
             reward = kl_reward + custom_rewards.unsqueeze(0)
@@ -226,10 +225,21 @@ if __name__ == "__main__":
     model = Actor(pretrain_or_model="EleutherAI/pythia-14m", packing_samples=True)
     critic_model = get_llm_for_sequence_regression("EleutherAI/pythia-14m", "critic", packing_samples=True)
     ref_model = Actor(pretrain_or_model="EleutherAI/pythia-14m", packing_samples=True)
-    prompts = ["User: Hello, how are you?\nAssistant: <think>", "User: What is the capital of France?\nAssistant: <think>", "User: What is the capital of Germany?\nAssistant: <think>"]
-    outputs = ["I'm good, thank you!", "Paris", "Berlin"]
-    # custom_rewards = [torch.tensor([1.0])] * len(prompts)
-    custom_rewards = None
+    prompts = [
+        "User: Hello, how are you?\nAssistant: <think>",
+        "User: What is the capital of France?\nAssistant: <think>",
+        "User: What is the capital of Germany?\nAssistant: <think>",
+    ]
+    outputs = [
+        "I'm good, thank you!",
+        "Paris",
+        "Berlin",
+    ]
+
+    output_tokens = _tokenize(tokenizer, outputs, 20, padding=False)["input_ids"]
+    custom_rewards = [torch.zeros(len(output_token)) for output_token in output_tokens]
+    for i, output_token in enumerate(output_tokens):
+        custom_rewards[i][-1] = 1.0
     ret_sequences, ret_attention_masks, ret_num_actions, ret_packed_seq_lens, ret_custom_rewards = _convert_prompts_outputs_to_batch_tensors_packing(
         prompts=prompts, 
         outputs=outputs, 
