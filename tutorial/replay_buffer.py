@@ -7,14 +7,47 @@ import torch
 from torch.nn.utils.rnn import pad_sequence
 
 from orz.ppo.models import get_llm_for_sequence_regression
+from orz.ppo.replay_buffer import NaiveReplayBuffer
 from packing import _convert_prompts_outputs_to_batch_tensors_packing, _tokenize
 from transformers import AutoTokenizer
 import torch.nn.functional as F
 import torch.nn as nn
+from torch.utils.data import DataLoader
 from rich.pretty import pprint
 
 from inference import inference_and_calculates, Actor, Experience
 from adv_and_returns import _calc_advantages_and_returns
+
+
+
+def normalize_advantages(buffer):
+    items = []
+    action_masks = []
+    for item in buffer:
+        items.append(getattr(item, "advantages"))
+        action_masks.append(item.action_mask)
+
+    items_vector = torch.cat(items).float().flatten()
+
+    if action_masks[0] is None:
+        # packing samples has no action mask
+        action_masks_vector = 1
+        num_actions = items_vector.numel()
+    else:
+        action_masks_vector = torch.cat(action_masks).flatten()
+        num_actions = action_masks_vector.sum()
+
+    # mean
+    mean = items_vector.mean()
+    # std
+    std = ((items_vector - mean).pow(2) * action_masks_vector).sum()
+    rstd = (std / num_actions).clamp(min=1e-8).rsqrt()
+
+    for i, item in enumerate(buffer):
+        t = (items[i] - mean) * rstd
+        setattr(item, "advantages", t.bfloat16())
+    return buffer
+
 
 
 if __name__ == "__main__":
@@ -76,7 +109,14 @@ if __name__ == "__main__":
         ref_model=ref_model,
         reward_model=None,
     )
-    pprint(experiences)
+
+    micro_train_batch_size = 2
+    replay_buffer = NaiveReplayBuffer(
+        sample_batch_size=micro_train_batch_size,
+        limit=0,
+        cpu_offload=True,
+        packing_samples=True,
+    )
 
     print("-" * 100)
     for experience in experiences:
@@ -88,4 +128,30 @@ if __name__ == "__main__":
             gamma=0.99,
             lambd=0.98,
         )
+        replay_buffer.append(experience)
         pprint((experience, metrics))
+
+    replay_buffer = normalize_advantages(replay_buffer)
+    pprint(replay_buffer)
+
+    actor_num_nodes = 1
+    actor_num_gpus_per_node = 1
+    critic_num_nodes = 1
+    critic_num_gpus_per_node = 1
+    num_policy_dp_nodes = actor_num_nodes * actor_num_gpus_per_node
+    num_critic_dp_nodes = critic_num_nodes * critic_num_gpus_per_node
+    policy_buffers = replay_buffer.split_to_n_batches(num_policy_dp_nodes)
+    pprint(policy_buffers)
+
+
+    dataloader = DataLoader(
+        replay_buffer,
+        batch_size=replay_buffer.sample_batch_size,
+        shuffle=True,
+        drop_last=False,
+        pin_memory=False,
+        collate_fn=replay_buffer.collate_fn,
+    )
+    for batch in dataloader:
+        pprint(batch)
+        break
