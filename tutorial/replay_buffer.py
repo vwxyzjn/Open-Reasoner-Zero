@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from functools import partial
 import random
+import time
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -18,7 +19,25 @@ from rich.pretty import pprint
 from inference import inference_and_calculates, Actor, Experience
 from adv_and_returns import _calc_advantages_and_returns
 
+class Timer:
+    """A context manager for timing code blocks"""
 
+    def __init__(self, description: str, noop: int = 0):
+        self.description = description
+        self.noop = noop
+
+    def __enter__(self):
+        if self.noop:
+            return
+        self.start_time = time.perf_counter()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        if self.noop:
+            return
+        self.end_time = time.perf_counter()
+        self.duration = self.end_time - self.start_time
+        print(f"{self.description}: {self.duration} seconds")
 
 def normalize_advantages(buffer):
     items = []
@@ -72,15 +91,16 @@ if __name__ == "__main__":
     custom_rewards = [torch.zeros(len(output_token)) for output_token in output_tokens]
     for i, output_token in enumerate(output_tokens):
         custom_rewards[i][-1] = 1.0
-    ret_sequences, ret_attention_masks, ret_num_actions, ret_packed_seq_lens, ret_custom_rewards = _convert_prompts_outputs_to_batch_tensors_packing(
-        prompts=prompts, 
-        outputs=outputs, 
-        custom_rewards=custom_rewards, 
-        packing_max_len=40, 
-        tokenizer=tokenizer, 
-        prompt_max_len=20, 
-        generate_max_len=20,
-    )
+    with Timer("convert_prompts_outputs_to_batch_tensors_packing"): 
+        ret_sequences, ret_attention_masks, ret_num_actions, ret_packed_seq_lens, ret_custom_rewards = _convert_prompts_outputs_to_batch_tensors_packing(
+            prompts=prompts, 
+            outputs=outputs, 
+            custom_rewards=custom_rewards, 
+            packing_max_len=40, 
+            tokenizer=tokenizer, 
+            prompt_max_len=20, 
+            generate_max_len=20,
+        )
     print(f"{len(prompts)} sequences are packed into {len(ret_sequences)} sequences")
     print(repr(tokenizer.decode(ret_sequences[0][0])))
     print(repr(tokenizer.decode(ret_sequences[1][0])))
