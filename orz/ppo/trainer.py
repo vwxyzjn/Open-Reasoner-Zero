@@ -48,7 +48,18 @@ class RayPPOTrainer:
         self.vllm_engines = vllm_engines
         self.prompts_dataloader = self.build_dataloader(train_dataset)
         self.colocate_pg = colocate_pg
+        
+        import wandb
 
+        wandb.init(
+            project="open_instruct_public",
+            entity="ai2-llm",
+            sync_tensorboard=True,
+            config=self.cfg,
+            name="ppo_orz_7b",
+            save_code=True,
+            tags=["ppo", "orz_7b"],
+        )
         self.writer = SummaryWriter(log_dir=self.cfg.tensorboard_log_dir)
         self.replay_buffer = NaiveReplayBuffer(
             sample_batch_size=self.cfg.micro_train_batch_size,
@@ -1289,7 +1300,7 @@ class RayPPOTrainer:
         await asyncio.gather(*backload_tasks)
 
     async def _sync_policy_weights_to_vllm(self):
-        if self.cfg.colocate_all:
-            await self.policy_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
-        else:
-            await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
+        # if self.cfg.colocate_all:
+        #     await self.policy_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
+        # else:
+        await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)

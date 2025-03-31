@@ -56,6 +56,9 @@ dependencies = [
     "peft>=0.14.0",
     "debugpy>=1.8.12",
     "rich>=13.9.4",
+    "beaker-py>=1.34.1",
+    "pytz>=2025.2",
+    "wandb>=0.19.8",
 ]
 
 [project.optional-dependencies]
