@@ -72,9 +72,15 @@ pip install -e .
 ```
 
 #### Start Orz-7B PPO Training
-debug running command in single node:
+
+debug running command:
 ```bash
 # NOTE: just for debug, not final setting!
+
+## Debug command in a single GPU with `EleutherAI/pythia-14m`
+DEBUG_MODE=True python -m playground.orz_14m_ppo_mini
+
+## Debug command in a single node (8 GPUs) with `Qwen/Qwen2.5-7B`
 DEBUG_MODE=True python -m playground.orz_7b_ppo
 ```
 
