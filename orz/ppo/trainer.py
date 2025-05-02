@@ -257,6 +257,10 @@ class RayPPOTrainer:
             return
 
         # 1.3 packing samples
+        # logger.info(f"all_prompts: {[len(p) for p in all_prompts]}")
+        # logger.info(f"outputs: {[len(o) for o in outputs]}")
+        # logger.info(f"custom_rewards: {[len(r) for r in custom_rewards]}")
+        # # raise
         async with Timer("Packing samples"):
             (
                 ret_sequences,
@@ -280,6 +284,10 @@ class RayPPOTrainer:
                 ret_custom_rewards,
             )
             logger.info(f"experiences size: {len(experiences)}")
+
+        # logger.info(f"ret_custom_rewards: {ret_custom_rewards}")
+        # logger.info(f"ret_custom_rewards shapes: {[len(r) for r in ret_custom_rewards]}")
+        # # raise
 
         # 2. visualization generated results example
         vis = self._detokenize(experiences[0].sequences[0][: int(experiences[0].info["total_length"].flatten()[0])])
@@ -833,56 +841,6 @@ class RayPPOTrainer:
 
         return experience, metrics
 
-    def _convert_prompts_outputs_to_batch_tensors(self, prompts: List[str], outputs: List[str]):
-        # This function is used when not packing samples
-        # concat all outputs to following format:
-        #
-        # | [PAD] [PAD] token token token | token token [EOS] [PAD] |
-        # | token token token token token | token token [EOS] [PAD] |
-        # | [PAD] [PAD] [PAD] token token | token token token [EOS] |
-        # |<---------- prompt ----------->|<-------- answer ------->|
-        max_input_len, max_output_len = 0, 0
-        prompt_token_lens, response_token_lens = [], []
-        inputs_token_ids, outputs_token_ids = [], []
-        for prompt, output in zip(prompts, outputs):
-            input_token_ids = self._tokenize(prompt, self.cfg.prompt_max_len, padding=False)["input_ids"]
-            response_token_ids = self._tokenize(output, self.cfg.generate_max_len, padding=False)["input_ids"]
-
-            inputs_token_ids.append(input_token_ids)
-            outputs_token_ids.append(response_token_ids)
-
-            prompt_token_len = len(input_token_ids)
-            response_token_len = len(response_token_ids)
-            prompt_token_lens.append(prompt_token_len)
-            response_token_lens.append(response_token_len)
-
-            max_input_len = max(max_input_len, prompt_token_len)
-            max_output_len = max(max_output_len, response_token_len)
-
-        pad_token_id, eos_token_id = self.tokenizer.pad_token_id, self.tokenizer.eos_token_id
-        sequences = []
-        for i, prompt in enumerate(prompts):
-            # left padding input
-            input_len = prompt_token_lens[i]
-            input_ids = [pad_token_id] * (max_input_len - input_len) + list(inputs_token_ids[i])
-
-            # right padding output
-            output_len = response_token_lens[i]
-            output_ids = list(outputs_token_ids[i]) + [pad_token_id] * (max_output_len - output_len)
-
-            # replace last token with eos_token_id if it is not eos_token_id, keep the total length of output_ids
-            # output_ids[output_len - 1] = eos_token_id
-
-            # concat input and output
-            sequences.append(input_ids + output_ids)
-
-        sequences = torch.tensor(sequences)
-
-        sequences, attention_mask, action_mask = self._process_sequences(
-            sequences, max_input_len, eos_token_id, pad_token_id
-        )
-        return sequences, attention_mask, action_mask
-
     def _convert_prompts_outputs_to_batch_tensors_packing(
         self, prompts: List[str], outputs: List[str], custom_rewards: Optional[List[torch.Tensor]], packing_max_len: int
     ):
@@ -1191,24 +1149,6 @@ class RayPPOTrainer:
 
         return generate
 
-    def _process_sequences(self, sequences: torch.Tensor, input_len, eos_token_id, pad_token_id):
-        attention_mask = (sequences.ne(eos_token_id) & sequences.ne(pad_token_id)).to(dtype=torch.long)
-        seq_length = attention_mask.size(1)
-
-        eos_indices = seq_length - attention_mask.long().fliplr().argmax(dim=1, keepdim=True).clamp(min=1)
-        sequences.scatter_(dim=1, index=eos_indices, value=eos_token_id)
-
-        # For Llama3 and Qwen2 models, there are some eos_tokens in the middle of the prompt.
-        first_token_indices = attention_mask.long().argmax(dim=1, keepdim=True)
-        mask = torch.arange(seq_length).unsqueeze(0).expand(sequences.size(0), -1).to(device=sequences.device)
-        attention_mask = (mask >= first_token_indices) & (mask <= eos_indices).to(dtype=torch.long)
-
-        # in RL, state_i (current token) + action_i (next token) -> state_i+1 (next token)
-        state_seq = sequences[:, input_len - 1 : -1]
-        action_mask = state_seq.ne(eos_token_id) & state_seq.ne(pad_token_id)
-        action_mask[:, 0] = 1
-
-        return sequences, attention_mask, action_mask
 
     def _tokenize(self, texts, max_length=99999999, padding=True, device=None):
         if not padding:
